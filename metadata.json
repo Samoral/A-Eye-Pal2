@@ -1,0 +1,6 @@
+{
+  "name": "A-Eye Pal",
+  "description": "Voice-first AI financial assistant designed for blind and low-vision individuals. Understand finances, initiate and authorize payments, review transactions, and manage budgets independently with your voice.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
