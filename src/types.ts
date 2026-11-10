@@ -41,6 +41,8 @@ export interface Transaction {
   paypalOrderId: string | null;
   paypalCaptureId: string | null;
   isBuyerApproved?: boolean;
+  isDemoMode?: boolean;
+  draftVersion?: number;
   createdAt: string;
   updatedAt: string;
 }

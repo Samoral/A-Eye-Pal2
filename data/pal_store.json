@@ -6,29 +6,7 @@
     "currency": "USD",
     "label": "A-Eye Pal Demo Balance (Not Real Money)"
   },
-  "activeDraft": {
-    "id": "tx-draft-1794216934330",
-    "type": "debit",
-    "amount": 350,
-    "currency": "USD",
-    "recipient": "Landlord",
-    "purpose": "Monthly apartment rent",
-    "status": "authorized",
-    "authorizationToken": "DEMO-AUTH-1794216934331-ec513ddd",
-    "paymentMethod": "PayPal Sandbox",
-    "paypalOrderId": null,
-    "paypalCaptureId": null,
-    "isDemoMode": true,
-    "createdAt": "2026-11-09T09:35:34.330Z",
-    "updatedAt": "2026-11-09T09:35:34.331Z",
-    "authorizedDetails": {
-      "amount": 350,
-      "currency": "USD",
-      "recipient": "Landlord",
-      "purpose": "Monthly apartment rent"
-    },
-    "conversationStage": "FINGERPRINT_VERIFIED"
-  },
+  "activeDraft": null,
   "transactions": [
     {
       "id": "tx-init-1",
@@ -43,8 +21,8 @@
       "paypalOrderId": "SANDBOX-ORDER-99120",
       "paypalCaptureId": "SANDBOX-CAP-1102",
       "isDemoMode": true,
-      "createdAt": "2026-11-06T09:35:34.276Z",
-      "updatedAt": "2026-11-06T09:35:34.277Z"
+      "createdAt": "2026-11-07T14:49:41.558Z",
+      "updatedAt": "2026-11-07T14:49:41.558Z"
     },
     {
       "id": "tx-init-2",
@@ -59,8 +37,8 @@
       "paypalOrderId": "SANDBOX-ORDER-99121",
       "paypalCaptureId": "SANDBOX-CAP-1103",
       "isDemoMode": true,
-      "createdAt": "2026-11-03T09:35:34.277Z",
-      "updatedAt": "2026-11-03T09:35:34.277Z"
+      "createdAt": "2026-11-04T14:49:41.558Z",
+      "updatedAt": "2026-11-04T14:49:41.558Z"
     },
     {
       "id": "tx-init-3",
@@ -75,39 +53,29 @@
       "paypalOrderId": null,
       "paypalCaptureId": null,
       "isDemoMode": true,
-      "createdAt": "2026-10-30T09:35:34.277Z",
-      "updatedAt": "2026-10-30T09:35:34.277Z"
+      "createdAt": "2026-10-31T14:49:41.558Z",
+      "updatedAt": "2026-10-31T14:49:41.558Z"
     }
   ],
   "budget": {
-    "id": "budget-active-1",
+    "id": "budget-draft-1794322181599",
     "allocations": [
       {
-        "id": "b-1",
-        "category": "Food & Groceries",
-        "amount": 150
+        "id": "b-1794322181599-0",
+        "category": "Food",
+        "amount": 300
       },
       {
-        "id": "b-2",
+        "id": "b-1794322181599-1",
         "category": "Transport",
-        "amount": 60
-      },
-      {
-        "id": "b-3",
-        "category": "Electricity & Utilities",
-        "amount": 90
-      },
-      {
-        "id": "b-4",
-        "category": "Emergency Savings",
-        "amount": 100
+        "amount": 300
       }
     ],
-    "totalAllocated": 400,
+    "totalAllocated": 600,
     "availableBalance": 650,
     "shortfall": 0,
-    "unallocated": 250,
+    "unallocated": 50,
     "status": "saved",
-    "lastUpdated": "2026-11-09T09:35:34.277Z"
+    "lastUpdated": "2026-11-10T14:49:41.599Z"
   }
 }

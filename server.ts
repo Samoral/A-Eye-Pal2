@@ -374,7 +374,7 @@ async function startServer() {
   // 8. PayPal Sandbox Order Creation
   app.post('/api/paypal/create-order', async (req: Request, res: Response) => {
     try {
-      const { authorizationToken } = req.body;
+      const { authorizationToken, draftId, draftVersion } = req.body;
       const db = getDatabase();
       const draft = db.activeDraft;
 
@@ -383,13 +383,35 @@ async function startServer() {
         return;
       }
 
-      if (!draft.authorizationToken || draft.authorizationToken !== authorizationToken) {
+      if (draftId && draft.id !== draftId) {
+        res.status(400).json({ error: 'Active draft ID mismatch' });
+        return;
+      }
+
+      if (draftVersion && draft.draftVersion && draft.draftVersion !== draftVersion) {
+        res.status(400).json({ error: 'Draft version mismatch. Transaction details have changed.' });
+        return;
+      }
+
+      const effectiveToken = authorizationToken || draft.authorizationToken;
+      if (!draft.authorizationToken || draft.authorizationToken !== effectiveToken) {
         res.status(403).json({ error: 'Invalid or missing authorization token. Please authorize via fingerprint first.' });
         return;
       }
 
+      // Check if transaction details changed since authorization
+      if (
+        draft.authorizedDetails &&
+        (draft.authorizedDetails.amount !== draft.amount ||
+         draft.authorizedDetails.recipient !== draft.recipient ||
+         draft.authorizedDetails.currency !== draft.currency)
+      ) {
+        res.status(400).json({ error: 'Transaction details have changed since authorization was granted. Authorization invalidated.' });
+        return;
+      }
+
       // Duplicate prevention: If draft already has an active order, reuse it
-      if (draft.paypalOrderId && draft.status === 'processing') {
+      if (draft.paypalOrderId && (draft.status === 'processing' || draft.status === 'authorized')) {
         res.json({
           success: true,
           order: {
@@ -433,13 +455,13 @@ async function startServer() {
   // 8B. PayPal Sandbox Buyer Approval with AUTOMATIC CAPTURE
   app.post('/api/paypal/approve-order', async (req: Request, res: Response) => {
     try {
-      const { authorizationToken, orderId } = req.body;
+      const { authorizationToken, orderId, draftId, draftVersion } = req.body;
       const db = getDatabase();
       const draft = db.activeDraft;
 
       // Idempotency: Check if already captured
       const existingCaptured = db.transactions.find(
-        (tx) => tx.paypalOrderId === orderId || (draft && draft.idempotencyKey && tx.idempotencyKey === draft.idempotencyKey)
+        (tx) => (orderId && tx.paypalOrderId === orderId) || (draft && draft.paypalOrderId && tx.paypalOrderId === draft.paypalOrderId) || (draft && draft.idempotencyKey && tx.idempotencyKey === draft.idempotencyKey)
       );
       if (existingCaptured && existingCaptured.status === 'completed') {
         res.json({
@@ -471,7 +493,18 @@ async function startServer() {
         return;
       }
 
-      if (!draft.authorizationToken || draft.authorizationToken !== authorizationToken) {
+      if (draftId && draft.id !== draftId) {
+        res.status(400).json({ error: 'Active draft ID mismatch' });
+        return;
+      }
+
+      if (draftVersion && draft.draftVersion && draft.draftVersion !== draftVersion) {
+        res.status(400).json({ error: 'Draft version mismatch. Transaction details have changed.' });
+        return;
+      }
+
+      const effectiveToken = authorizationToken || draft.authorizationToken;
+      if (!draft.authorizationToken || draft.authorizationToken !== effectiveToken) {
         res.status(403).json({ error: 'Invalid or missing authorization token' });
         return;
       }
@@ -492,7 +525,12 @@ async function startServer() {
         return;
       }
 
-      const activeOrderId = draft.paypalOrderId || orderId || `SANDBOX-ORD-${Date.now()}`;
+      const activeOrderId = draft.paypalOrderId || orderId;
+      if (!activeOrderId) {
+        res.status(400).json({ error: 'No PayPal order ID associated with this transaction draft. Please create or initialize the order first.' });
+        return;
+      }
+
       draft.paypalOrderId = activeOrderId;
       draft.isBuyerApproved = true;
       draft.conversationStage = 'PAYPAL_ORDER_APPROVED';
@@ -549,10 +587,12 @@ async function startServer() {
 
       // Finalize backend balance ledger
       const finalized = FinancialEngine.finalizePayment({
-        authorizationToken,
+        authorizationToken: effectiveToken,
         paypalOrderId: activeOrderId,
         paypalCaptureId: captureResult.captureId,
         isDemoMode: captureResult.isDemoMode,
+        draftId: draft.id,
+        draftVersion: draft.draftVersion,
       });
 
       if (!finalized.success) {
@@ -599,13 +639,13 @@ async function startServer() {
   // 9. PayPal Sandbox Capture & Settlement (Direct REST endpoint)
   app.post('/api/paypal/capture', async (req: Request, res: Response) => {
     try {
-      const { authorizationToken, orderId } = req.body;
+      const { authorizationToken, orderId, draftId, draftVersion } = req.body;
       const db = getDatabase();
       const draft = db.activeDraft;
 
       // Duplicate capture prevention: If already captured, return existing finalized receipt
       const existingCaptured = db.transactions.find(
-        (tx) => tx.paypalOrderId === orderId || (draft && draft.idempotencyKey && tx.idempotencyKey === draft.idempotencyKey)
+        (tx) => (orderId && tx.paypalOrderId === orderId) || (draft && draft.paypalOrderId && tx.paypalOrderId === draft.paypalOrderId) || (draft && draft.idempotencyKey && tx.idempotencyKey === draft.idempotencyKey)
       );
       if (existingCaptured && existingCaptured.status === 'completed') {
         res.json({
@@ -634,8 +674,25 @@ async function startServer() {
         return;
       }
 
-      if (!draft.authorizationToken || draft.authorizationToken !== authorizationToken) {
+      if (draftId && draft.id !== draftId) {
+        res.status(400).json({ error: 'Active draft ID mismatch' });
+        return;
+      }
+
+      if (draftVersion && draft.draftVersion && draft.draftVersion !== draftVersion) {
+        res.status(400).json({ error: 'Draft version mismatch' });
+        return;
+      }
+
+      const effectiveToken = authorizationToken || draft.authorizationToken;
+      if (!draft.authorizationToken || draft.authorizationToken !== effectiveToken) {
         res.status(403).json({ error: 'Invalid authorization token' });
+        return;
+      }
+
+      // Order ID mismatch validation
+      if (draft.paypalOrderId && orderId && draft.paypalOrderId !== orderId) {
+        res.status(400).json({ error: 'PayPal order ID mismatch with active draft' });
         return;
       }
 
@@ -656,8 +713,9 @@ async function startServer() {
         return;
       }
 
+      const activeOrderId = orderId || draft.paypalOrderId;
       // Execute capture via PayPal Sandbox service
-      const captureResult = await PayPalService.captureOrder(orderId, draft.amount, draft.currency);
+      const captureResult = await PayPalService.captureOrder(activeOrderId, draft.amount, draft.currency);
 
       if (captureResult.status !== 'COMPLETED') {
         res.status(500).json({ error: 'PayPal Sandbox payment capture was not completed' });
@@ -666,10 +724,12 @@ async function startServer() {
 
       // Finalize backend balance ledger
       const finalized = FinancialEngine.finalizePayment({
-        authorizationToken,
-        paypalOrderId: orderId,
+        authorizationToken: effectiveToken,
+        paypalOrderId: activeOrderId,
         paypalCaptureId: captureResult.captureId,
         isDemoMode: captureResult.isDemoMode,
+        draftId: draft.id,
+        draftVersion: draft.draftVersion,
       });
 
       if (!finalized.success) {
@@ -698,6 +758,18 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // PayPal Sandbox Return & Cancel Redirect Endpoints
+  app.get('/api/paypal/return', (req: Request, res: Response) => {
+    const token = (req.query.token as string) || '';
+    const payerId = (req.query.PayerID as string) || '';
+    res.redirect(`/?paypal_return=success&token=${encodeURIComponent(token)}&payerId=${encodeURIComponent(payerId)}`);
+  });
+
+  app.get('/api/paypal/cancel', (req: Request, res: Response) => {
+    const token = (req.query.token as string) || '';
+    res.redirect(`/?paypal_return=cancel&token=${encodeURIComponent(token)}`);
   });
 
   // 10. Budget Management Endpoints

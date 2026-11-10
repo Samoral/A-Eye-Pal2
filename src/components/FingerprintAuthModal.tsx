@@ -117,8 +117,9 @@ export const FingerprintAuthModal: React.FC<FingerprintAuthModalProps> = ({
         navigator.vibrate([80, 50, 120]);
       }
 
-      // Exact announcements required by prompt
+      // Exact announcements from authoritative backend
       const announce =
+        data.announcement ||
         'Demo fingerprint verification successful. No real fingerprint was accessed. Fingerprint verification successful. Your payment is authorized. Proceeding to PayPal Sandbox.';
       setVerificationAnnouncement(announce);
       await speechService.speak(announce);

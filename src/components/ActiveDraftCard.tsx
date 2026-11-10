@@ -123,7 +123,7 @@ export const ActiveDraftCard: React.FC<ActiveDraftCardProps> = ({
             </>
           ) : draft.conversationStage === 'AWAITING_PAYPAL_APPROVAL' || draft.conversationStage === 'AUTHORIZED_PENDING_FINGERPRINT' ? (
             <>
-              Say <span className="text-[#0070BA] font-bold">"Approve payment"</span> to approve and automatically complete payment.
+              Say <span className="text-[#0070BA] font-bold">"Approve with PayPal"</span> or <span className="text-[#0070BA] font-bold">"Proceed to PayPal"</span> to approve and automatically complete payment.
             </>
           ) : draft.conversationStage === 'AWAITING_AUTHORIZATION' ? (
             <>

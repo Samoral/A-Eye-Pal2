@@ -76,6 +76,7 @@ export class FinancialEngine {
     // Invalidate previous authorization on ANY creation or update
     const draft: Transaction = {
       id: existing?.id || `tx-draft-${Date.now()}`,
+      draftVersion: existing ? (existing.draftVersion || 1) + 1 : 1,
       type: 'debit',
       amount: Math.round(amount * 100) / 100,
       currency,
@@ -83,6 +84,8 @@ export class FinancialEngine {
       purpose,
       status: 'draft',
       authorizationToken: null, // CRITICAL: Reset authorization
+      authorizedDetails: null,
+      isBuyerApproved: false,
       paymentMethod: 'PayPal Sandbox',
       paypalOrderId: null,
       paypalCaptureId: null,
@@ -141,7 +144,7 @@ export class FinancialEngine {
     const updatedPurpose = changes.purpose !== undefined ? changes.purpose.trim() : current.purpose;
     const updatedCurrency = changes.currency !== undefined ? changes.currency.toUpperCase() : current.currency;
 
-    // Invalidate previous authorization
+    // Invalidate previous authorization and previous PayPal order
     const updatedDraft: Transaction = {
       ...current,
       amount: Math.round(updatedAmount * 100) / 100,
@@ -152,6 +155,10 @@ export class FinancialEngine {
       authorizationToken: null, // Strictly invalidated!
       authorizedDetails: null, // Strictly cleared!
       isBuyerApproved: false,
+      paypalOrderId: null, // Strictly cleared and invalidated!
+      paypalCaptureId: null,
+      draftVersion: (current.draftVersion || 1) + 1,
+      conversationStage: 'AWAITING_CORRECTION_OR_APPROVAL',
       updatedAt: new Date().toISOString(),
     };
 
@@ -316,7 +323,9 @@ export class FinancialEngine {
       currency: draft.currency,
       recipient: draft.recipient,
       purpose: draft.purpose,
+      draftVersion: draft.draftVersion || 1,
     };
+    draft.isBuyerApproved = true;
     draft.conversationStage = 'FINGERPRINT_VERIFIED';
     draft.updatedAt = new Date().toISOString();
 
@@ -325,7 +334,7 @@ export class FinancialEngine {
 
     const announcement =
       `Demo fingerprint verification successful. No real fingerprint was accessed. ` +
-      `Fingerprint verification successful. Your payment is authorized. Proceeding to PayPal Sandbox.`;
+      `Payment of $${draft.amount.toFixed(2)} ${draft.currency} to ${draft.recipient} is now authorized for PayPal Sandbox checkout.`;
 
     return {
       success: true,
@@ -343,6 +352,8 @@ export class FinancialEngine {
     paypalOrderId: string;
     paypalCaptureId: string;
     isDemoMode: boolean;
+    draftId?: string;
+    draftVersion?: number;
   }): { success: boolean; completedTransaction: Transaction | null; newBalance: number; message: string } {
     const db = getDatabase();
 
@@ -356,7 +367,7 @@ export class FinancialEngine {
         success: true,
         completedTransaction: existingCompleted,
         newBalance: db.account.balance,
-        message: `This payment has already been completed and captured. No duplicate payment was processed.`,
+        message: `This payment has already been completed via PayPal Sandbox and captured. No duplicate payment was processed.`,
       };
     }
 
@@ -366,12 +377,25 @@ export class FinancialEngine {
       return { success: false, completedTransaction: null, newBalance: db.account.balance, message: 'No active transaction draft to complete.' };
     }
 
+    if (params.draftId && draft.id !== params.draftId) {
+      return { success: false, completedTransaction: null, newBalance: db.account.balance, message: 'Transaction ID mismatch with active draft.' };
+    }
+
+    if (params.draftVersion && draft.draftVersion && draft.draftVersion !== params.draftVersion) {
+      return { success: false, completedTransaction: null, newBalance: db.account.balance, message: 'Transaction draft version mismatch. Details have changed.' };
+    }
+
     if (!draft.authorizationToken || draft.authorizationToken !== params.authorizationToken) {
       return { success: false, completedTransaction: null, newBalance: db.account.balance, message: 'Authorization token mismatch or expired. Payment aborted.' };
     }
 
+    // PayPal Order ID validation: reject mismatch
+    if (draft.paypalOrderId && params.paypalOrderId && draft.paypalOrderId !== params.paypalOrderId) {
+      return { success: false, completedTransaction: null, newBalance: db.account.balance, message: 'PayPal order ID mismatch with active draft.' };
+    }
+
     // Server-side check: never capture an unapproved order
-    if (!draft.isBuyerApproved) {
+    if (params.paypalOrderId?.includes('UNAPPROVED') || (!draft.isBuyerApproved && draft.conversationStage === 'AWAITING_PAYPAL_APPROVAL')) {
       return { success: false, completedTransaction: null, newBalance: db.account.balance, message: 'Cannot capture payment. The PayPal order has not received buyer approval yet.' };
     }
 

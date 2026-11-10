@@ -212,24 +212,40 @@ export class ConversationalPaymentEngine {
     }
 
     // 1C. VOICE PAYPAL APPROVAL COMMANDS
-    // Supported: "Approve payment.", "I approve this payment.", "Continue to PayPal."
+    // Supported: "Approve with PayPal.", "Proceed to PayPal.", "Continue to payment approval.", "Open PayPal approval.", "I want to approve this payment."
     const isApprovalCommand =
+      cleanText === 'approve with paypal' ||
+      cleanText === 'i want to approve this payment' ||
       cleanText === 'approve payment' ||
       cleanText === 'i approve this payment' ||
       cleanText === 'continue to paypal' ||
       cleanText === 'approve' ||
-      cleanText === 'i approve';
+      cleanText === 'i approve' ||
+      cleanText === 'pay with paypal' ||
+      cleanText === 'confirm with paypal' ||
+      cleanText === 'approve checkout' ||
+      cleanText === 'confirm checkout' ||
+      cleanText === 'approve transaction' ||
+      cleanText === 'yes approve' ||
+      cleanText === 'yes approve payment';
 
-    if (isApprovalCommand) {
+    const isOpenApprovalFlowCommand =
+      cleanText === 'proceed to paypal' ||
+      cleanText === 'continue to payment approval' ||
+      cleanText === 'open paypal approval' ||
+      cleanText === 'open paypal' ||
+      cleanText === 'proceed to payment approval' ||
+      cleanText === 'open paypal checkout';
+
+    if (isOpenApprovalFlowCommand) {
       if (draft) {
-        // If draft is still in review/prior to authorization, prompt to authorize first
         if (
           draft.conversationStage === 'AWAITING_DETAILS_CONFIRMATION' ||
           draft.conversationStage === 'AWAITING_CORRECTION_OR_APPROVAL' ||
           draft.conversationStage === 'AWAITING_AUTHORIZATION'
         ) {
           return {
-            spokenResponse: 'Please authorize this payment first before approving checkout. Say "I authorize this payment".',
+            spokenResponse: 'Please authorize this payment first before opening PayPal approval. Say "I authorize this payment".',
             intent: 'APPROVE_PAYPAL_ORDER',
             stage: draft.conversationStage,
             soundCue: 'warning',
@@ -242,56 +258,80 @@ export class ConversationalPaymentEngine {
           };
         }
 
-        if (!draft.authorizationToken) {
-          draft.authorizationToken = `DEMO-AUTH-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-        }
-        if (!draft.authorizedDetails) {
-          draft.authorizedDetails = {
-            amount: draft.amount,
-            currency: draft.currency,
-            recipient: draft.recipient,
-            purpose: draft.purpose,
-          };
-        }
+        // Authoritative order association: reuse existing order ID or assign one without duplication
         if (!draft.paypalOrderId) {
-          draft.paypalOrderId = `SANDBOX-ORD-${Date.now()}`;
+          draft.paypalOrderId = `SANDBOX-ORD-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
         }
-
-        // Mark buyer approved
-        draft.isBuyerApproved = true;
         draft.status = 'processing';
-        draft.conversationStage = 'PAYPAL_ORDER_APPROVED';
+        draft.conversationStage = 'AWAITING_PAYPAL_APPROVAL';
         draft.updatedAt = new Date().toISOString();
         db.activeDraft = draft;
         saveDatabase(db);
 
-        // AUTOMATIC CAPTURE: Execute capture immediately upon PayPal buyer approval
-        const captureId = `SANDBOX-CAP-${Date.now()}`;
-        const finalizeResult = FinancialEngine.finalizePayment({
-          authorizationToken: draft.authorizationToken,
-          paypalOrderId: draft.paypalOrderId,
-          paypalCaptureId: captureId,
-          isDemoMode: true,
-        });
-
-        const freshDb = getDatabase();
-        const updatedBalance = freshDb.account.balance.toFixed(2);
-        const captureSpoken = `PayPal approval received. Completing your payment. Your payment has been captured successfully. Payment of $${draft.amount.toFixed(2)} ${draft.currency} to ${draft.recipient} has been completed via PayPal Sandbox. Your new available balance is $${updatedBalance} ${draft.currency}.`;
+        const openSpoken = `PayPal approval is now required for your payment of $${draft.amount.toFixed(2)} ${draft.currency} to ${draft.recipient}. Say "Approve with PayPal" to complete payment.`;
 
         return {
-          spokenResponse: captureSpoken,
-          intent: 'APPROVE_AND_CAPTURE_PAYMENT',
-          stage: 'COMPLETED',
-          soundCue: 'success',
-          modalAction: 'none',
-          activeDraft: null,
-          budget: freshDb.budget,
+          spokenResponse: openSpoken,
+          intent: 'OPEN_PAYPAL_APPROVAL',
+          stage: 'AWAITING_PAYPAL_APPROVAL',
+          soundCue: 'neutral',
+          modalAction: 'show_checkout',
+          activeDraft: draft,
+          budget: db.budget,
           account: FinancialEngine.getFinancialSummary(),
           originalTranscript: rawInput,
           interpretedTranscript: effectiveInput,
           isCorrected: correctionResult.isCorrected,
         };
       } else {
+        const lastTx = db.transactions[0];
+        if (lastTx && lastTx.status === 'completed') {
+          return {
+            spokenResponse: 'This payment has already been completed via PayPal Sandbox and captured. No duplicate payment was processed.',
+            intent: 'OPEN_PAYPAL_APPROVAL',
+            stage: 'COMPLETED',
+            soundCue: 'neutral',
+            modalAction: 'none',
+            activeDraft: null,
+            budget: db.budget,
+            account: FinancialEngine.getFinancialSummary(),
+            originalTranscript: rawInput,
+            interpretedTranscript: effectiveInput,
+          };
+        }
+        return {
+          spokenResponse: 'You have no active payment awaiting PayPal approval. You can say "Pay 50 dollars to John" to start a new payment.',
+          intent: 'OPEN_PAYPAL_APPROVAL',
+          stage: 'IDLE',
+          soundCue: 'warning',
+          modalAction: 'none',
+          activeDraft: null,
+          budget: db.budget,
+          account: FinancialEngine.getFinancialSummary(),
+          originalTranscript: rawInput,
+          interpretedTranscript: effectiveInput,
+        };
+      }
+    }
+
+    if (isApprovalCommand) {
+      if (!draft) {
+        // Idempotency: check if payment was just completed
+        const lastTx = db.transactions[0];
+        if (lastTx && lastTx.status === 'completed') {
+          return {
+            spokenResponse: 'This payment has already been completed via PayPal Sandbox and captured. No duplicate payment was processed.',
+            intent: 'APPROVE_PAYPAL_ORDER',
+            stage: 'COMPLETED',
+            soundCue: 'neutral',
+            modalAction: 'none',
+            activeDraft: null,
+            budget: db.budget,
+            account: FinancialEngine.getFinancialSummary(),
+            originalTranscript: rawInput,
+            interpretedTranscript: effectiveInput,
+          };
+        }
         return {
           spokenResponse: 'You have no active payment to approve.',
           intent: 'APPROVE_PAYPAL_ORDER',
@@ -305,6 +345,95 @@ export class ConversationalPaymentEngine {
           interpretedTranscript: effectiveInput,
         };
       }
+
+      // If draft is still in review/prior to authorization, prompt to authorize first
+      if (
+        draft.conversationStage === 'AWAITING_DETAILS_CONFIRMATION' ||
+        draft.conversationStage === 'AWAITING_CORRECTION_OR_APPROVAL' ||
+        draft.conversationStage === 'AWAITING_AUTHORIZATION'
+      ) {
+        return {
+          spokenResponse: 'Please authorize this payment first before approving checkout. Say "I authorize this payment".',
+          intent: 'APPROVE_PAYPAL_ORDER',
+          stage: draft.conversationStage,
+          soundCue: 'warning',
+          modalAction: 'none',
+          activeDraft: draft,
+          budget: db.budget,
+          account: FinancialEngine.getFinancialSummary(),
+          originalTranscript: rawInput,
+          interpretedTranscript: effectiveInput,
+        };
+      }
+
+      if (!draft.authorizationToken) {
+        draft.authorizationToken = `DEMO-AUTH-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      }
+      if (!draft.authorizedDetails) {
+        draft.authorizedDetails = {
+          amount: draft.amount,
+          currency: draft.currency,
+          recipient: draft.recipient,
+          purpose: draft.purpose,
+          draftVersion: draft.draftVersion || 1,
+        };
+      }
+      // Authoritative order association: reuse existing order ID or assign one without duplication
+      if (!draft.paypalOrderId) {
+        draft.paypalOrderId = `SANDBOX-ORD-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      }
+
+      // Mark buyer approved
+      draft.isBuyerApproved = true;
+      draft.status = 'processing';
+      draft.conversationStage = 'PAYPAL_ORDER_APPROVED';
+      draft.updatedAt = new Date().toISOString();
+      db.activeDraft = draft;
+      saveDatabase(db);
+
+      // AUTOMATIC CAPTURE: Execute capture immediately upon PayPal buyer approval
+      const captureId = `SANDBOX-CAP-${Date.now()}`;
+      const finalizeResult = FinancialEngine.finalizePayment({
+        authorizationToken: draft.authorizationToken,
+        paypalOrderId: draft.paypalOrderId,
+        paypalCaptureId: captureId,
+        isDemoMode: true,
+        draftId: draft.id,
+        draftVersion: draft.draftVersion,
+      });
+
+      if (!finalizeResult.success) {
+        return {
+          spokenResponse: `Payment capture failed: ${finalizeResult.message}. Your balance was not deducted.`,
+          intent: 'CAPTURE_FAILED',
+          stage: draft.conversationStage,
+          soundCue: 'error',
+          modalAction: 'none',
+          activeDraft: draft,
+          budget: db.budget,
+          account: FinancialEngine.getFinancialSummary(),
+          originalTranscript: rawInput,
+          interpretedTranscript: effectiveInput,
+        };
+      }
+
+      const freshDb = getDatabase();
+      const updatedBalance = freshDb.account.balance.toFixed(2);
+      const captureSpoken = `PayPal approval received. Completing your payment. Your payment has been captured successfully. Payment of $${draft.amount.toFixed(2)} ${draft.currency} to ${draft.recipient} has been completed via PayPal Sandbox. Your new available balance is $${updatedBalance} ${draft.currency}.`;
+
+      return {
+        spokenResponse: captureSpoken,
+        intent: 'APPROVE_AND_CAPTURE_PAYMENT',
+        stage: 'COMPLETED',
+        soundCue: 'success',
+        modalAction: 'none',
+        activeDraft: null,
+        budget: freshDb.budget,
+        account: FinancialEngine.getFinancialSummary(),
+        originalTranscript: rawInput,
+        interpretedTranscript: effectiveInput,
+        isCorrected: correctionResult.isCorrected,
+      };
     }
 
     // 1D. VOICE TRANSACTION REVIEW CONFIRMATION
@@ -661,6 +790,12 @@ export class ConversationalPaymentEngine {
         const token = `DEMO-AUTH-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
         draft.status = 'authorized';
         draft.authorizationToken = token;
+        draft.authorizedDetails = {
+          amount: draft.amount,
+          currency: draft.currency,
+          recipient: draft.recipient,
+          purpose: draft.purpose,
+        };
         draft.conversationStage = 'AUTHORIZED_PENDING_FINGERPRINT';
         draft.updatedAt = new Date().toISOString();
         db.activeDraft = draft;
@@ -790,11 +925,16 @@ export class ConversationalPaymentEngine {
       const updatedRecipient = newRecipient || draft.recipient; // PRESERVE EXISTING RECIPIENT!
       const updatedCurrency = newCurrency || draft.currency;
 
-      // CRITICAL: Strictly invalidate previous authorization
+      // CRITICAL: Strictly invalidate previous authorization and order
       draft.amount = updatedAmount;
       draft.recipient = updatedRecipient;
       draft.currency = updatedCurrency;
       draft.authorizationToken = null; // Invalidate
+      draft.authorizedDetails = null;
+      draft.isBuyerApproved = false;
+      draft.paypalOrderId = null; // Strictly invalidate previous order
+      draft.paypalCaptureId = null;
+      draft.draftVersion = (draft.draftVersion || 1) + 1;
       draft.status = 'draft';
       draft.conversationStage = 'AWAITING_CORRECTION_OR_APPROVAL';
       draft.updatedAt = new Date().toISOString();
@@ -849,7 +989,10 @@ export class ConversationalPaymentEngine {
        cleanText.startsWith('send ') ||
        cleanText.startsWith('transfer ') ||
        cleanText.includes('want to pay')) &&
-      !cleanText.includes('authorize');
+      !cleanText.includes('authorize') &&
+      !cleanText.includes('approve') &&
+      !cleanText.includes('paypal') &&
+      !cleanText.includes('approval');
 
     if (isPaymentInitiation) {
       // Check if user is saying "pay $75" while an active draft exists and specifies only an amount
@@ -858,6 +1001,11 @@ export class ConversationalPaymentEngine {
         if (matchAmt) {
           draft.amount = parseFloat(matchAmt[1]);
           draft.authorizationToken = null;
+          draft.authorizedDetails = null;
+          draft.isBuyerApproved = false;
+          draft.paypalOrderId = null; // Strictly invalidate previous order
+          draft.paypalCaptureId = null;
+          draft.draftVersion = (draft.draftVersion || 1) + 1;
           draft.status = 'draft';
           draft.conversationStage = 'AWAITING_CORRECTION_OR_APPROVAL';
           draft.updatedAt = new Date().toISOString();
@@ -916,6 +1064,7 @@ export class ConversationalPaymentEngine {
 
       const newDraft: Transaction = {
         id: `tx-draft-${Date.now()}`,
+        draftVersion: 1,
         type: 'debit',
         amount: amountVal,
         currency: 'USD',
@@ -926,6 +1075,8 @@ export class ConversationalPaymentEngine {
           ? 'AWAITING_CORRECTION_OR_APPROVAL'
           : 'AWAITING_DETAILS_CONFIRMATION',
         authorizationToken: null,
+        authorizedDetails: null,
+        isBuyerApproved: false,
         idempotencyKey: `idemp-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
         paymentMethod: 'PayPal Sandbox',
         paypalOrderId: null,

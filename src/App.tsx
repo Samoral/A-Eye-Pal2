@@ -172,6 +172,48 @@ export default function App() {
     fetchAccountSummary();
   }, [fetchAccountSummary]);
 
+  // Handle return from PayPal Sandbox redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paypalReturn = params.get('paypal_return');
+    const token = params.get('token') || params.get('orderId');
+
+    if (paypalReturn) {
+      window.history.replaceState({}, '', window.location.pathname);
+      if (paypalReturn === 'success') {
+        speechService.speak('Returned from PayPal. Completing your payment approval and capture.');
+        apiFetch('/api/paypal/approve-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: token,
+          }),
+        })
+          .then((res) => {
+            if (res.success) {
+              soundService.playSuccess();
+              const msg = res.spokenAnnouncement || 'Payment successfully captured via PayPal Sandbox.';
+              setSpokenAssistantResponse(msg);
+              speechService.speak(msg);
+              fetchAccountSummary();
+            }
+          })
+          .catch((err) => {
+            soundService.playError();
+            const errText = `PayPal payment capture failed: ${err.message || 'Unknown error'}`;
+            setSpokenAssistantResponse(errText);
+            speechService.speak(errText);
+          });
+      } else if (paypalReturn === 'cancel') {
+        soundService.playWarning();
+        const cancelMsg = 'PayPal payment was cancelled. Your account balance remains unchanged.';
+        setSpokenAssistantResponse(cancelMsg);
+        speechService.speak(cancelMsg);
+        fetchAccountSummary();
+      }
+    }
+  }, [fetchAccountSummary]);
+
   // Clear System Activity Events
   const handleClearActivityEvents = async () => {
     setActivityEvents([]);
@@ -256,6 +298,12 @@ export default function App() {
       // Check modal trigger and stage synchronization
       if (data.modalAction === 'open_fingerprint') {
         setIsFingerprintOpen(true);
+      } else if (data.modalAction === 'show_checkout' || data.stage === 'AWAITING_PAYPAL_APPROVAL') {
+        setIsFingerprintOpen(false);
+        setIsPayPalCheckoutOpen(true);
+        if (data.activeDraft?.authorizationToken) {
+          setActiveAuthToken(data.activeDraft.authorizationToken);
+        }
       } else if (data.stage === 'COMPLETED' || data.intent === 'CANCEL_TRANSACTION' || !data.activeDraft) {
         setIsFingerprintOpen(false);
         setIsPayPalCheckoutOpen(false);
@@ -576,11 +624,12 @@ export default function App() {
       <PayPalCheckoutModal
         isOpen={isPayPalCheckoutOpen}
         draft={activeDraft}
-        authorizationToken={activeAuthToken}
+        authorizationToken={activeAuthToken || activeDraft?.authorizationToken || null}
         paypalStatus={paypalStatus}
         theme={theme}
         onClose={() => setIsPayPalCheckoutOpen(false)}
         onPaymentSuccess={handlePayPalPaymentSuccess}
+        onDraftUpdated={(updatedDraft) => setActiveDraft(updatedDraft)}
       />
 
       {/* Accessibility Help & Shortcuts Modal */}

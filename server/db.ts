@@ -28,7 +28,9 @@ export interface Transaction {
     currency: string;
     recipient: string;
     purpose: string;
+    draftVersion?: number;
   } | null;
+  draftVersion?: number;
   idempotencyKey?: string | null;
   paymentMethod: string;
   paypalOrderId: string | null;

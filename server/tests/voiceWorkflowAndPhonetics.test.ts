@@ -232,8 +232,8 @@ describe('Voice-Controlled PayPal Automatic Capture & Accuracy Suite', () => {
 
     const fpResult = FinancialEngine.authorizeDraftWithDemoFingerprint();
     expect(fpResult.success).toBe(true);
-    expect(fpResult.announcement).toContain('Fingerprint verification successful. Your payment is authorized.');
-    expect(fpResult.announcement).toContain('Proceeding to PayPal Sandbox.');
+    expect(fpResult.announcement).toContain('Demo fingerprint verification successful. No real fingerprint was accessed.');
+    expect(fpResult.announcement).toContain('is now authorized for PayPal Sandbox checkout.');
   });
 
   // Scenario 15: Voice cancellation at each stage
